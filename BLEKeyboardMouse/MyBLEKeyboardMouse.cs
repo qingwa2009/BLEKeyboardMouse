@@ -10,6 +10,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Storage.Streams;
 using System.Runtime.InteropServices;
 using Windows.Devices.Enumeration;
+using System.Collections.Concurrent;
 
 namespace BLEKeyboardMouse
 {
@@ -486,31 +487,33 @@ namespace BLEKeyboardMouse
         static byte[] iMouseReports = new byte[8];
         static byte[] oReports = new byte[1];
 
-        static Dictionary<string, BluetoothLEDevice> clients = new Dictionary<string, BluetoothLEDevice>();
+        static ConcurrentDictionary<string, BluetoothLEDevice> clients = new ConcurrentDictionary<string, BluetoothLEDevice>();
 
         private static async void SubscribedClientsChanged(GattLocalCharacteristic sender) {
             for (int i = 0; i < sender.SubscribedClients.Count; i++) {
                 var client = sender.SubscribedClients[i].Session;
                 client.MaintainConnection = true;
                 if (!clients.ContainsKey(client.DeviceId.Id)) {
-                    clients.Add(client.DeviceId.Id, null);
                     Console.WriteLine(System.DateTime.Now);
                     var bleD = await BluetoothLEDevice.FromIdAsync(client.DeviceId.Id);//太慢了
                     Console.WriteLine(System.DateTime.Now);
-                    clients[client.DeviceId.Id]=bleD;
-                    bleD.ConnectionStatusChanged += BleD_ConnectionStatusChanged;
-                    MyConsole.WriteLine($"SubscribedClientsChanged: {bleD.Name}");
+                    if(clients.TryAdd(client.DeviceId.Id, bleD)) {
+                        bleD.ConnectionStatusChanged += BleD_ConnectionStatusChanged;
+                        MyConsole.WriteLine($"SubscribedClientsChanged: {bleD.Name}");
+                    }
                 }
             }
         }
 
         private static void BleD_ConnectionStatusChanged(BluetoothLEDevice sender, object args) {
             MyConsole.WriteLine($"BleD_ConnectionStatusChanged: {sender.Name} {sender.ConnectionStatus}");
+            BluetoothLEDevice ble;
             if (sender.ConnectionStatus == BluetoothConnectionStatus.Disconnected) {
-                clients.Remove(sender.DeviceId);
+                clients.TryRemove(sender.DeviceId, out ble);
                 sender.Dispose();
             } else {
-                clients.Add(sender.DeviceId, sender);
+                if(!clients.ContainsKey(sender.DeviceId))
+                    clients.TryAdd(sender.DeviceId, sender);
             }
         }
 
